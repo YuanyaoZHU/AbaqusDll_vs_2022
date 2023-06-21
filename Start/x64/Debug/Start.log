@@ -1,0 +1,5 @@
+﻿  App.cpp
+E:\TiM_Programing\AbaqusDll\Start\App.cpp(13,9): warning C4101: “panels2”: 未引用的局部变量
+  Start.cpp
+  正在生成代码...
+  Start.vcxproj -> E:\TiM_Programing\AbaqusDll\x64\Debug\Start.exe

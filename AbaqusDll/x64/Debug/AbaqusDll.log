@@ -1,0 +1,4 @@
+﻿  abaqusExternalDll.cpp
+E:\TiM_Programing\AbaqusDll\AbaqusDll\abaqusExternalDll.cpp(72,12): warning C4101: “Rotation”: 未引用的局部变量
+    正在创建库 E:\TiM_Programing\AbaqusDll\x64\Debug\AbaqusDll.lib 和对象 E:\TiM_Programing\AbaqusDll\x64\Debug\AbaqusDll.exp
+  AbaqusDll.vcxproj -> E:\TiM_Programing\AbaqusDll\x64\Debug\AbaqusDll.dll
