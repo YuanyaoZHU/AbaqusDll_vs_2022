@@ -97,6 +97,7 @@ int PANEL1[10000][13] = { 0 };//Panel单元[xx][0]为Panel单元编号，[xx][1-4]为包含
 double PANEL2[10000][6] = { 0 };//Panel单元[0-2]为Panel的方向向量，[3-5]为Panel单元的中心点坐标
 double PANEL3[10000][3] = { 0 };//Panel单元中心的速度，2023.3.14增加
 double PANEL4[10000] = { 0 }; //Panel单元的实时面积
+bool PANEL5[10000] = { 0 }; //Panel单元是否在水流下游，true为是，false为否
 
 int Panelsline = 0; //用于记录读取了多少个Panel单元，在start_zhu这updatePanels函数中用到
 
@@ -138,7 +139,6 @@ int CharLength = 0;
 extern "C" _declspec(dllexport) int start_zhu()
 {
     double dtime;
-    int r;
     string workpath;
     string label;
     //----------------------------------------------------------
@@ -219,11 +219,8 @@ extern "C" _declspec(dllexport) int start_zhu()
     in >> PanelMod; //输入PanelMod
 
 
-    in >> label;
-    for (int i = 0;i < 10;i++)
-    {
-        in >> selectElement[i];
-    }
+    in >> label; 
+    in >> selectElement[0] >> selectElement[1] >> selectElement[2] >> selectElement[3] >> selectElement[4] >> selectElement[5] >> selectElement[6] >> selectElement[7] >> selectElement[8] >> selectElement[9];    
     in >> label;
     in >> selectPanel[0] >> selectPanel[1] >> selectPanel[2] >> selectPanel[3] >> selectPanel[4] >> selectPanel[5] >> selectPanel[6] >> selectPanel[7] >> selectPanel[8] >> selectPanel[9];
     in >> label;
@@ -261,7 +258,7 @@ extern "C" _declspec(dllexport) int start_zhu()
     cout << "IF_VELOCITY_FILTER = " << IF_VELOCITY_FILTER << endl;
     cout << "Velocity_Filter_L = " << Velocity_Filter_L << endl;
     cout << "Velocity_Filter_G = " << Velocity_Filter_G << endl;
-    cout << "PanelMod = " << PanelMod;
+    cout << "PanelMod = " << PanelMod << endl;
     cout << "selectElement:" << selectElement[0] << "  " << selectElement[1] << endl;
     cout << "selectPanel:" << selectPanel[0] << "    " << selectPanel[5] << endl;
     cout << "selectNode: " << selectNode[0] << "    " << selectNode[5] << endl;
@@ -408,6 +405,7 @@ extern "C" _declspec(dllexport) int start_zhu()
         {
             PANEL2[i][j] = readOutFile.Panel2[i][j];
         }
+        PANEL5[i] = readOutFile.Panel3[i];
     }
     
     //输出少量数据验证NODES和NODE读取的结果正确
@@ -518,7 +516,7 @@ extern "C" _declspec(dllexport) int start_zhu()
     }
     fout.close();
 
-
+    
 
 //-----------------------------------------------------------
 	system("pause");
@@ -1529,6 +1527,7 @@ extern "C" _declspec(dllexport) int getv(int* ELM_NO, double* time, double* VW, 
 
 extern "C" _declspec(dllexport) int getwaterv(int* NOEL, double* time, double* VW)
 {
+    //cout << "come into getwaterv!" << endl;
     double pi = 3.1415926;
     domega = freq[1]-freq[0];
     double time1 = time[0];
@@ -1542,6 +1541,7 @@ extern "C" _declspec(dllexport) int getwaterv(int* NOEL, double* time, double* V
 
     double COORD[3];//本COORD用于NET_MODE==1的情况下
     double COORD2[3][2];//本COORD2用于NET_MODE == 2的情况下
+  
     if (NET_MODE == 1)
     {
         int NO1;
@@ -1564,6 +1564,7 @@ extern "C" _declspec(dllexport) int getwaterv(int* NOEL, double* time, double* V
     }
     else if (NET_MODE == 2)
     {
+        //cout << "come into Net_MODE 2!" << endl;
         int NO1;
         int NO2;
         Vector3d Normal;
@@ -1574,6 +1575,11 @@ extern "C" _declspec(dllexport) int getwaterv(int* NOEL, double* time, double* V
         double* F2 = new double[3];//所在另一Panel单元的力
         double velocity_local;
         Vector3d VelocityPanel;
+        
+        double* current1 = new double[3]; //N01处的下游水流速度
+        double* current2 = new double[3]; //NO2处的下游水流速度
+
+        
 
 
 
@@ -1585,6 +1591,10 @@ extern "C" _declspec(dllexport) int getwaterv(int* NOEL, double* time, double* V
             {
                 F1[i] = 0;
             }
+            /*if (*NOEL == selectElement[0])
+            {
+                cout << "selectElement:  " << selectElement[0] << "    NO1= " << NO1 << endl;
+            }*/
         }
         else
         {
@@ -1615,10 +1625,38 @@ extern "C" _declspec(dllexport) int getwaterv(int* NOEL, double* time, double* V
                 PANEL3[NO1][1] = PANEL3[NO1][1] / velocity_local * Velocity_Filter_G;
                 PANEL3[NO1][2] = PANEL3[NO1][2] / velocity_local * Velocity_Filter_G;
             }
-            Ve_Water(0) = vw[0] - PANEL3[NO1][0] + current[0];//水质点相对速度Ve_Water = vw-vx;vw为水质点速度，vx为Panel单元速度，修改于2023.3.14
-            Ve_Water(1) = vw[1] - PANEL3[NO1][1] + current[1];
-            Ve_Water(2) = vw[2] - PANEL3[NO1][2] + current[2];
+
+            
+            if (PANEL5[NO1])//如果判断当前PANEL单元为网衣背面，则水流速度需要衰减
+            {
+                double reduce;//计算水流衰减率的值，公式为 r = 1-0.46 * cd
+                Ve_Water(0) = current[0];
+                Ve_Water(1) = current[1];
+                Ve_Water(2) = current[2];
+                reduce = 1 - 0.46 * CD_calculate(Ve_Water);
+                current1[0] = current[0] * reduce;
+                current1[1] = current[1] * reduce;
+                current1[2] = current[2] * reduce;
+            }
+            else
+            {
+                current1[0] = current[0];
+                current1[1] = current[1];
+                current1[2] = current[2];
+            }
+            
+            Ve_Water(0) = vw[0] - PANEL3[NO1][0] + current1[0];//水质点相对速度Ve_Water = vw-vx;vw为水质点速度，vx为Panel单元速度，修改于2023.3.14
+            Ve_Water(1) = vw[1] - PANEL3[NO1][1] + current1[1];
+            Ve_Water(2) = vw[2] - PANEL3[NO1][2] + current1[2];
+            
             calculateforce(F1, Normal, Ve_Water, NO1);
+            /*if (*NOEL == selectElement[0])
+            {
+                cout << "E(1) VeWater(1-3)=    " << Ve_Water(0) << "    " << Ve_Water(1) << "    " << Ve_Water(2) << endl;
+                cout << "curent[0-2]  " << current[0] << "    " << current[1] << "    " << current[2] << endl;
+                cout << "F1 =  " << F1[0] <<"    " <<F1[1]<<"    "<< F1[2] << endl;
+            }*/
+            
         }
 
         if (NO2 < 0)//此步用于判断该节点是否为完整的PANEL单元，如等于0说明该节点并非PANEL单元
@@ -1627,6 +1665,10 @@ extern "C" _declspec(dllexport) int getwaterv(int* NOEL, double* time, double* V
             {
                 F2[i] = 0;
             }
+            /*if (*NOEL == selectElement[0])
+            {
+                cout << "selectElement:  " << selectElement[0] << "    NO2= " << NO2 << endl;
+            }*/
         }
         else
         {
@@ -1653,15 +1695,41 @@ extern "C" _declspec(dllexport) int getwaterv(int* NOEL, double* time, double* V
             }
             else if (velocity_local > Velocity_Filter_G && IF_VELOCITY_FILTER)
             {
-                PANEL3[NO1][0] = PANEL3[NO1][0] / velocity_local * Velocity_Filter_G;
-                PANEL3[NO1][1] = PANEL3[NO1][1] / velocity_local * Velocity_Filter_G;
-                PANEL3[NO1][2] = PANEL3[NO1][2] / velocity_local * Velocity_Filter_G;
+                PANEL3[NO2][0] = PANEL3[NO2][0] / velocity_local * Velocity_Filter_G;
+                PANEL3[NO2][1] = PANEL3[NO2][1] / velocity_local * Velocity_Filter_G;
+                PANEL3[NO2][2] = PANEL3[NO2][2] / velocity_local * Velocity_Filter_G;
             }
 
-            Ve_Water(0) = vw[0] - PANEL3[NO2][0] + current[0];//水质点相对速度Ve_Water = vw-vx;vw为水质点速度，vx为Panel单元速度;修改于2023.3.14
-            Ve_Water(1) = vw[1] - PANEL3[NO2][1] + current[1];
-            Ve_Water(2) = vw[2] - PANEL3[NO2][2] + current[2];
+            if (PANEL5[NO2])//如果判断当前PANEL单元为网衣背面，则水流速度需要衰减
+            {
+                double reduce;//计算水流衰减率的值，公式为 r = 1-0.46 * cd
+                Ve_Water(0) = current[0];
+                Ve_Water(1) = current[1];
+                Ve_Water(2) = current[2];
+                reduce = 1 - 0.46 * CD_calculate(Ve_Water);
+                current2[0] = current[0] * reduce;
+                current2[1] = current[1] * reduce;
+                current2[2] = current[2] * reduce;
+            }
+            else
+            {
+                current2[0] = current[0];
+                current2[1] = current[1];
+                current2[2] = current[2];
+            }
+
+            Ve_Water(0) = vw[0] - PANEL3[NO2][0] + current2[0];//水质点相对速度Ve_Water = vw-vx;vw为水质点速度，vx为Panel单元速度;修改于2023.3.14
+            Ve_Water(1) = vw[1] - PANEL3[NO2][1] + current2[1];
+            Ve_Water(2) = vw[2] - PANEL3[NO2][2] + current2[2];
+           
             calculateforce(F2, Normal, Ve_Water, NO2);
+            /*if (*NOEL == selectElement[0])
+            {
+                cout << "E(2) VeWater(1-3)=    " << Ve_Water(0) << "    " << Ve_Water(1) << "    " << Ve_Water(2) << endl;
+                cout << "curent[0-2]  " << current[0] << "    " << current[1] << "    " << current[2] << endl;
+                cout << "F2 =  " << F2[0] << "    " << F2[1] << "    " << F2[2] << endl;
+            }*/
+            
         }
 
 
@@ -1676,7 +1744,7 @@ extern "C" _declspec(dllexport) int getwaterv(int* NOEL, double* time, double* V
 
         for (int i = 0;i < 10;i++)
         {
-            if (*NOEL == selectNode[i])
+            if (*NOEL == selectElement[i])
             {
                 //建立elementForce,计算得到的力
                 string elementForce = "elementForce.txt";
@@ -1701,9 +1769,13 @@ extern "C" _declspec(dllexport) int getwaterv(int* NOEL, double* time, double* V
 
         delete[] F1;
         delete[] F2;
+
+        delete[] current1;
+        delete[] current2;
        
     }
     delete[] vw;
+    //cout << "end getwaterv fucntion!" << endl;
     /* 这部分整合成了fluidVelocity函数
     if (wave_mod == 1)
     {
@@ -1929,6 +2001,7 @@ extern "C" _declspec(dllexport) int updatepanel()
     return 0;
 }
 
+//本函数用于计算水指点速度，VW为输出变量表示水质点速度，time为当前时刻，COORD为节点坐标
 void fluidVelocity(double VW[3], double time, double COORD[3])
 {
     //double* VW = new double[3];
@@ -2020,6 +2093,7 @@ void fluidVelocity(double VW[3], double time, double COORD[3])
     //return VW;
 }
 
+
 void calculateforce(double F[3], Vector3d Normal, Vector3d vw, int NO_local)
 {
     double pi = 3.1415926;
@@ -2078,6 +2152,12 @@ void calculateforce(double F[3], Vector3d Normal, Vector3d vw, int NO_local)
         CL0 = (0.5 * CD0 - CT) / sqrt(2.0);
         CD = CD0 * (0.9 * cos(radian_angle) + 0.1 * cos(3 * radian_angle));
         CL = CL0 * (1.0 * sin(2 * radian_angle) + 0.1 * sin(4 * radian_angle));
+        /*if (NO_local == selectPanel[0] - 1 || NO_local == selectPanel[1] - 1)
+        {
+            cout << "CD0 = " << CD0 << endl;
+            cout << "Sn = " << Sn << endl;
+            cout << "radian_angle=  " << radian_angle << endl;
+        }*/
 
     }
 
@@ -2085,10 +2165,22 @@ void calculateforce(double F[3], Vector3d Normal, Vector3d vw, int NO_local)
     
     if (IF_PANEL_AREA)//如果IF_PANEL_AREA为真，则实时更新PANEL单元面积，注于2023.3.18
     {
-        A_screen = PANEL4[NO_local];        
+        A_screen = PANEL4[NO_local]; 
+        /*if (NO_local == selectPanel[0] - 1 || NO_local == selectPanel[1] - 1)
+        {
+            cout << "A_screen = " << A_screen << endl;
+        }*/
     }
     
     Fd = CD * 0.5 * rou * A_screen * vw.norm() * vw;
+    /*if (NO_local == selectPanel[0]-1 || NO_local == selectPanel[1]-1)
+    {
+        cout << "Fd = " << Fd(0) << "    " << Fd(1) << "    " << Fd(2) << endl;
+        cout << "vw = " << vw(0) << "    " << vw(1) << "    " << vw(2) << endl;
+        cout << "vw.norm =" << vw.norm() << endl;
+        cout << "rou = " << rou << endl;
+        cout << "CD = " << CD << endl;
+    }*/
 
     RotateAxis = vw.cross(Normal);
     RotateAxis.normalize();
@@ -2112,5 +2204,44 @@ void calculateforce(double F[3], Vector3d Normal, Vector3d vw, int NO_local)
     {
         F[i] = Fd(i)+Fl(i);
     }
+    /*if (NO_local == selectPanel[0]-1 || NO_local == selectPanel[1]-1)
+    {
+        cout << "F = " << F[0] << "    " << F[1] << "    " << F[2] << endl;
+    }*/
     //return F;
+}
+
+double CD_calculate(Vector3d vw)
+{
+    double CD_local;
+    if (PanelMod == 0)
+    {
+        Sn = 2 * dw / lw;
+        CD_local = 0.04 + (-0.04 + Sn - 1.24 * pow(Sn, 2) + 13.7 * pow(Sn, 3)) * cos(0);        
+    }
+    else if (PanelMod == 1)
+    {
+        Sn = dw * (2 * lw + 0.5 * dw) / pow(lw, 2);
+        CD_local = 0.04 + (-0.04 + 0.33 * Sn + 6.54 * pow(Sn, 2) - 4.88 * pow(Sn, 3)) * cos(0);        
+    }
+    else if (PanelMod == 2)
+    {
+        double pi = 3.1415926;
+        double Cdcyl;
+        double CD0;
+        double CL0;
+        double CT;
+        double Re;
+        double Cd;
+        Sn = 2 * (dw / lw) - pow(dw / lw, 2);
+        Re = rho * dw * vw.norm() / miu / (1 - Sn);
+        Cdcyl = -78.46675 + 254.73873 * log10(Re) - 327.8864 * pow(log10(Re), 2) + 223.64577 * pow(log10(Re), 3) - 87.92234 * pow(log10(Re), 4) + 20.00769 * pow(log10(Re), 5) - 2.44894 * pow(log10(Re), 6) + 0.12479 * pow(log10(Re), 7);
+        CD0 = Cdcyl * Sn * (2 - Sn) / 2 / pow(1 - Sn, 2);
+        Cd = CD0;
+
+        CT = pi * Cd / (8 + Cd);
+        CL0 = (0.5 * CD0 - CT) / sqrt(2.0);
+        CD_local = CD0 * (0.9 * cos(0) + 0.1 * cos(0));        
+      }
+    return CD_local;
 }

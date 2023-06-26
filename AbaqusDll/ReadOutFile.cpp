@@ -36,6 +36,7 @@ ReadOutFile::ReadOutFile()
 
 	Panel1 = new int* [k];
 	Panel2 = new double* [k];
+	Panel3 = new bool[k];
 	for (int i = 0; i < k;i++)
 	{
 		Panel1[i] = new int[13];
@@ -84,6 +85,7 @@ int ReadOutFile::ReadInPanels()
 		{
 			fin >> Panel2[i][j];
 		}
+		fin >> Panel3[i];
 	}
 	return 0;
 }

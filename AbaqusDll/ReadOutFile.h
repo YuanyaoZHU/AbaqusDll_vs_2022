@@ -35,6 +35,7 @@ public:
 	double** hydroValue;
 	int** Panel1; //Panel1：用于记录
 	double** Panel2;
+	bool* Panel3; //记录网衣是否在下游，2023.6.26
 	int F_n;
 
 	int kk();
