@@ -19,7 +19,7 @@ extern "C" _declspec(dllexport) int abaqusdlldisp(double *time, double* disp, do
 extern "C" _declspec(dllexport) int setv(int* ELM_NO, double* time, double* V);
 extern "C" _declspec(dllexport) int setcoord(int* ELM_NO, double* time, double* COORD);
 extern "C" _declspec(dllexport) int getv(int* ELM_NO, double* time, double* VW, double* V);
-extern "C" _declspec(dllexport) int getwaterv(int* NOEL, double* time, double* VW);
+extern "C" _declspec(dllexport) int getwaterv(int* NOEL, double* time, double* VW, int* DOWAVE);
 extern "C" _declspec(dllexport) int updatepanel();
 void fluidVelocity(double VW[3], double time, double COORD[3]);
 void calculateforce(double F[3],Vector3d Normal, Vector3d vw,int NO_local);

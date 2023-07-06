@@ -30,7 +30,7 @@ double TIME2 = 0;//
 int N = 0;
 double DTIME = 0;
 double dTIME = 0.01;
-double TIME3 = 0;
+double TIME3 = 0;//TIME3为modelica下一时间步的时间，其更新位置位于Modelica2Dll中，在之前的编程中有两个作用，第一是判断Modelica的时间步是否更新，第二是用来判断abaqus中的子时间步是否到达下一时间步。
 double TIME4 = -1;
 
 //以下参数用于计算ABAQUS差时参数
@@ -122,10 +122,14 @@ bool IF_COUPLING = TRUE; //用于判断是否和MODELICA耦合
 bool IF_PANEL_AREA = TRUE; //判断是否实时更新PANEL单元的面积
 bool IF_VELOCITY_FILTER = TRUE;//是否采用速度过滤，即速度小于某一值时，认定其为0，以保证系统的稳定性
 
+bool IF_INFI_DEPTH;//是否采用无限水深计算水质点速度
+
 double Velocity_Filter_L = 0;
 double Velocity_Filter_G = 0;
 
 int PanelMod = 0;//用于判断采用哪种PanelMod，与Cheng et al（2020）文章中的一致，1: S1, 2: S2, 3 :S3
+
+
 
 char WorkPathChar[100] = { 0 };
 int CharLength = 0;
@@ -226,6 +230,8 @@ extern "C" _declspec(dllexport) int start_zhu()
     in >> label;
     in >> selectNode[0] >> selectNode[1] >> selectNode[2] >> selectNode[3] >> selectNode[4] >> selectNode[5] >> selectNode[6] >> selectNode[7] >> selectNode[8] >> selectNode[9];
 
+    in >> label;
+    in >> IF_INFI_DEPTH; // 是否采用无限水深计算k值和水质点速度
     CharLength = workpath.length();
     strcpy_s(WorkPathChar, CharLength + 1, workpath.c_str());
     
@@ -262,6 +268,7 @@ extern "C" _declspec(dllexport) int start_zhu()
     cout << "selectElement:" << selectElement[0] << "  " << selectElement[1] << endl;
     cout << "selectPanel:" << selectPanel[0] << "    " << selectPanel[5] << endl;
     cout << "selectNode: " << selectNode[0] << "    " << selectNode[5] << endl;
+    cout << "IF_INFI_DEPTH:" << IF_INFI_DEPTH << endl;
 	cout << "Initialized success!" << endl;
     cout << "&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&" << endl;
     cout << endl;
@@ -524,17 +531,15 @@ extern "C" _declspec(dllexport) int start_zhu()
 	return 0;
 }
 
+/// <summary>
+/// 本函数由Modelica调用，用于存放位移，并获得Abaqus载荷
+/// </summary>
+/// <param name="time">输入变量，Modelica当前时间，double类型</param>
+/// <param name="disp">输入变量，Modelica提供的全局位移</param>
+/// <param name="dload">输出变量，由ABAQUS计算的网衣载荷</param>
+/// <returns></returns>
 extern "C" _declspec(dllexport) int Modelica2Dll(double time, double *disp, double* velocity, double* accel,double *dload) //
 {
-    /// <summary>
-    /// 本函数由Modelica调用，用于存放位移，并获得Abaqus载荷
-    /// </summary>
-    /// <param name="time">输入变量，本时间步的时间，double类型</param>
-    /// <param name="disp">输入变量，Modelica提供的全局位移</param>
-    /// <param name="dload">输出变量，由ABAQUS计算的网衣载荷</param>
-    /// <returns></returns>
-
-
     double Disp[6];
     double Velocity[6];
     double Accel[6];
@@ -771,7 +776,7 @@ extern "C" _declspec(dllexport) int Modelica2Dll(double time, double *disp, doub
         TIME = time;
         TIME3 = TIME + dTIME;
         //cout <<"#2 TIME进行更新！" <<"    TIME = " << TIME << "    " << "    TIME3= " << TIME3 << endl; //这一步在耦合控制之前
-       
+        cout << "#2   time = " << time << "    dTIME = " << dTIME << endl; //
         if (time >= dTIME)//这个判断是用来让程序在0时刻不耦合
         {
             //---------------------------------------------------------------------
@@ -860,7 +865,7 @@ extern "C" _declspec(dllexport) int Modelica2Dll(double time, double *disp, doub
     for (int i = 0;i < 6;i++)
     {
         Dload[i] = DLOAD_M[i];
-        dload[i] = -Dload[i];
+        dload[i] = Dload[i]; //2023.7.6，原来这里是dload = -Dload，我不知道这里已经负一次了，在modelica里面改了，所以这边就不负了。
     }
     fstream in;
     in.open("force_modelica.txt", ios::app);
@@ -873,9 +878,15 @@ extern "C" _declspec(dllexport) int Modelica2Dll(double time, double *disp, doub
 	return 0;
 }
 
-
+/// <summary>
+    /// 本函数在ABAQUS的URDFIL子程序中调用，将dload输入到共享内存中，并阻塞ABAQUS线程开放modelica线程
+    /// </summary>
+    /// <param name="time">输入变量，time[0]为当前Step的时间，time[1]为全局时间，double类型</param>
+    /// <param name="dload">输入变量，由ABAQUS计算的支反力</param>
+    /// <returns></returns>
 extern "C" _declspec(dllexport) int abaqusdllurdfil(double *time, double* dload)
 {
+    
     double Dload[6];
     //TIME3 = time[0] + DTIME;
     //cout << "#3 abaqusdllurdfil刚进来时，各全局时间展示!" << "    TIME =  " << TIME <<"    TIME3 =  " << TIME3 << "    time[0]=    " << time[0] << endl;
@@ -896,16 +907,28 @@ extern "C" _declspec(dllexport) int abaqusdllurdfil(double *time, double* dload)
     TIME_INT = int(time[0] * 10 / DTIME);
     TIME3_INT = int(TIME * 10 / DTIME);//int(TIME3 * 10 / DTIME); 这里URDFIL子程序是在ABAQUS本步末尾处进行调用的，此时time[0]还未更新，理论上是等这一步调用完了，才进入到DISP新一步的调用，2022.10.16
 
-    err = abs(TIME_INT - TIME3_INT);
+    //err = abs(TIME_INT - TIME3_INT); //2023.7.6 原程序中用来判断abaqus当前时间步是否与modelica时间步一致。
+
+    
 
     if (IF_COUPLING) //当IF_COUPLING为TRUE时，才与MODELICA进行耦合
     {
-
+        /*
         if (err <= 1)
         {
             ERR = TRUE;
             cout << "ERR1 is ture!" << endl;
 
+        }
+        else
+        {
+            ERR = FALSE;
+        }
+        */
+
+        if (time[0]>=TIME)//2023.7.6 此部分是用来判断ABAQSU时间步是否超过Modelica，如果超过了则停下来，让modelica更新新的位置、速度、加速度
+        {
+            ERR = TRUE;
         }
         else
         {
@@ -951,6 +974,15 @@ extern "C" _declspec(dllexport) int abaqusdllurdfil(double *time, double* dload)
     return 0;
 }
 
+
+/// <summary>
+/// 用于abaqus中的子程序DISP获取位移、速度、加速度的函数。
+/// </summary>
+/// <param name="time">输入变量，time[0]为全局时间，time[1]为当前step时间</param>
+/// <param name="disp"></param>
+/// <param name="velocity"></param>
+/// <param name="accel_zhu"></param>
+/// <returns></returns>
 extern "C" _declspec(dllexport) int abaqusdlldisp(double *time, double* disp, double* velocity, double* accel_zhu)
 {
     
@@ -994,7 +1026,9 @@ extern "C" _declspec(dllexport) int abaqusdlldisp(double *time, double* disp, do
         ERR = FALSE;
     }
 
-    if (time[0] != TIME2 && N==1 && ERR)//N的作用是防止程序第一次调用就卡住了，因为time[0]在首次运行时是不等于TIME2的
+    //if (time[0] != TIME2 && N==1 && ERR)//N的作用是防止程序第一次调用就卡住了，因为time[0]在首次运行时是不等于TIME2的
+    //2023.7.6 上面这步是之前判断ABAQUS是否阻塞的条件判断语句，现改为如下形式，即当前step时间大于Modelica时间TIME，则发生耦合。
+    if (time[1]>=TIME+time[2])
     {
        
         //////////////////////////////////////////////////////////////////////////
@@ -1029,7 +1063,7 @@ extern "C" _declspec(dllexport) int abaqusdlldisp(double *time, double* disp, do
     N = 1;
     //------------------------------------------------------------------------------
     //本段程序用于计算ABAQUS在Modelica时间步中间部分的运动
-    t = time[1] - TIME + dTIME;
+    t = time[1] - TIME + dTIME; //TIME本身是优先于time[1]的，time[1]加上这个dTIME刚好使时间t为合理的值。
     if (DTIME < dTIME)
     {
         t = t - DTIME;
@@ -1120,6 +1154,8 @@ extern "C" _declspec(dllexport) int abaqusdlldisp(double *time, double* disp, do
         //cout << " disp[" << i << "] = " << disp[i] << endl;
     }
     // 由于采用的是直接计算拟合曲线的系数，而非矩阵法，在初步计算时，计算结果不会发生奇异性，所以没必要在开始时将位置强制设置成0
+
+    /* 2023.7.6 由于采用非定步长算法，所以不用本步了。
     if (time[1] < 3* dTIME)//这是为了在0时刻时，防止发生奇异矩阵
     {
         for (int i = 0;i < 6;i++)
@@ -1129,7 +1165,7 @@ extern "C" _declspec(dllexport) int abaqusdlldisp(double *time, double* disp, do
             accel_zhu[i] = 0;
         }
     }
-    
+    */
 
     /*
     for (int i = 0;i < 3;i++)
@@ -1296,15 +1332,15 @@ extern "C" _declspec(dllexport) int setcoord(int* ELM_NO, double* time, double* 
     return 0;
 }
 
+/// <summary>
+/// 本函数用于获取水流相对该单元的法向速度
+/// </summary>
+/// <param name="ELM_NO">输入：单元编号</param>
+/// <param name="VW">输入：水流速度（矢量）</param>
+/// <param name="VN">输出：法向速度</param>
+/// <returns></returns>
 extern "C" _declspec(dllexport) int getv(int* ELM_NO, double* time, double* VW, double* VN)
 {
-    /// <summary>
-    /// 本函数用于获取水流相对该单元的法向速度
-    /// </summary>
-    /// <param name="ELM_NO">输入：单元编号</param>
-    /// <param name="VW">输入：水流速度（矢量）</param>
-    /// <param name="VN">输出：法向速度</param>
-    /// <returns></returns>
     int EN;  //ELEM编号
     int NO[2]; //Element包含的 Node编号
     double V_N[2][3];//Node的速度
@@ -1525,12 +1561,13 @@ extern "C" _declspec(dllexport) int getv(int* ELM_NO, double* time, double* VW, 
     return 0;
 }
 
-extern "C" _declspec(dllexport) int getwaterv(int* NOEL, double* time, double* VW)
+extern "C" _declspec(dllexport) int getwaterv(int* NOEL, double* time, double* VW, int* DOWAVE)
 {
     //cout << "come into getwaterv!" << endl;
     double pi = 3.1415926;
     domega = freq[1]-freq[0];
     double time1 = time[0];
+    double time2 = time[1];
     double temp1=0;
     double temp2=0;
     double zeta=0;
@@ -1541,6 +1578,12 @@ extern "C" _declspec(dllexport) int getwaterv(int* NOEL, double* time, double* V
 
     double COORD[3];//本COORD用于NET_MODE==1的情况下
     double COORD2[3][2];//本COORD2用于NET_MODE == 2的情况下
+
+    /*if (*NOEL == selectElement[0])
+    {
+        cout << "selectElement:  " << selectElement[0] << "    DOWAVE = " << *DOWAVE << endl;
+    }*/
+    
   
     if (NET_MODE == 1)
     {
@@ -1604,7 +1647,17 @@ extern "C" _declspec(dllexport) int getwaterv(int* NOEL, double* time, double* V
             COORD[0] = COORD2[0][0];
             COORD[1] = COORD2[1][0];
             COORD[2] = COORD2[2][0];
-            fluidVelocity(vw, time1, COORD);
+            if (*DOWAVE == 1) //添加于2023.6.27，用于判断该阶段是否有波浪
+            {
+                fluidVelocity(vw, time2, COORD); //修改time1为time2，为了控制在不同Step下是否加波浪，2023.6.27
+            }
+            else
+            {
+                vw[0] = 0;
+                vw[1] = 0;
+                vw[2] = 0;
+            }
+            
             Normal(0) = PANEL2[NO1][0];
             Normal(1) = PANEL2[NO1][1];
             Normal(2) = PANEL2[NO1][2];
@@ -1678,7 +1731,18 @@ extern "C" _declspec(dllexport) int getwaterv(int* NOEL, double* time, double* V
             COORD[0] = COORD2[0][1];
             COORD[1] = COORD2[1][1];
             COORD[2] = COORD2[2][1];
-            fluidVelocity(vw, time1, COORD);
+
+            if (*DOWAVE == 1) //添加于2023.6.27，用于判断该阶段是否有波浪
+            {
+                fluidVelocity(vw, time2, COORD); //修改time1为time2，为了控制在不同Step下是否加波浪，2023.6.27
+            }
+            else
+            {
+                vw[0] = 0;
+                vw[1] = 0;
+                vw[2] = 0;
+            }
+            // fluidVelocity(vw, time1, COORD);
             Normal(0) = PANEL2[NO2][0];
             Normal(1) = PANEL2[NO2][1];
             Normal(2) = PANEL2[NO2][2];
@@ -2015,7 +2079,7 @@ void fluidVelocity(double VW[3], double time, double COORD[3])
     double k = 0;
 
 
-    if (wave_mod == 1)
+    if (wave_mod == 1) //Irregualar wave
     {
         double* f2 = new double[F_n];
         double* f3 = new double[F_n];
@@ -2055,15 +2119,29 @@ void fluidVelocity(double VW[3], double time, double COORD[3])
         delete[] f4;
         delete[] f5;
     }
-    else if (wave_mod == 2)
+    else if (wave_mod == 2) //regular wave
     {
         waveNumber WaveNumber(waterDepth);
         double Omega = 2 * pi / Tp;
-        k = WaveNumber.newton(Omega);
+        double ff3;
+        double ff5;
+        if (IF_INFI_DEPTH)
+        {
+            k = pow(Omega, 2) / 9.81;
+            ff3 = Omega * exp(k * COORD[2]);
+            ff5 = ff3;
+        }
+        else
+        {
+            k = WaveNumber.newton(Omega);
+            ff3 = Omega * cosh(k * (COORD[2] + waterDepth)) / sinh(k * waterDepth);
+            ff5 = Omega * sinh(k * (COORD[2] + waterDepth)) / sinh(k * waterDepth);
+        }
+        
         double ff2 = cos(Omega * time + pi / 180 * ragular_wave_phase - k * COORD[0]);
-        double ff3 = Omega * cosh(k * (COORD[2] + waterDepth)) / sinh(k * waterDepth);
+        
         double ff4 = -sin(Omega * time + pi / 180 * ragular_wave_phase - k * COORD[0]);
-        double ff5 = Omega * sinh(k * (COORD[2] + waterDepth)) / sinh(k * waterDepth);
+        
         zeta = 0.5 * Hs * ff2 * ff3;//0.5*Hs为波浪振幅
         zeta1 = 0.5 * Hs * ff4 * ff5;
 
@@ -2175,9 +2253,11 @@ void calculateforce(double F[3], Vector3d Normal, Vector3d vw, int NO_local)
     Fd = CD * 0.5 * rou * A_screen * vw.norm() * vw;
     /*if (NO_local == selectPanel[0]-1 || NO_local == selectPanel[1]-1)
     {
+        cout << "NO_local =    " << NO_local << endl;        
         cout << "Fd = " << Fd(0) << "    " << Fd(1) << "    " << Fd(2) << endl;
         cout << "vw = " << vw(0) << "    " << vw(1) << "    " << vw(2) << endl;
         cout << "vw.norm =" << vw.norm() << endl;
+        cout << "A_screen =    " << A_screen << endl;
         cout << "rou = " << rou << endl;
         cout << "CD = " << CD << endl;
     }*/
@@ -2206,14 +2286,14 @@ void calculateforce(double F[3], Vector3d Normal, Vector3d vw, int NO_local)
     }
     /*if (NO_local == selectPanel[0]-1 || NO_local == selectPanel[1]-1)
     {
-        cout << "F = " << F[0] << "    " << F[1] << "    " << F[2] << endl;
+        cout << "NO_local = " << NO_local << "F = " << F[0] << "    " << F[1] << "    " << F[2] << endl;
     }*/
     //return F;
 }
 
 double CD_calculate(Vector3d vw)
 {
-    double CD_local;
+    double CD_local = 0;//局部CD值
     if (PanelMod == 0)
     {
         Sn = 2 * dw / lw;
