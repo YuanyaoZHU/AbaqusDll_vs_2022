@@ -117,6 +117,8 @@ double A_screen = 0;//经过群花后的网眼面积
 bool initial_SETV = TRUE;
 bool initial_SETCOORD = TRUE;
 bool initial_GETV = TRUE;
+bool initial_ELMTFORCE1 = TRUE;
+bool initial_ELMTFORCE2 = TRUE;
 bool IF_ELEM_VELOCITY = TRUE; //用于判断在计算Panel单元水流相对速度时是否计算Panel单元自身的速度
 bool IF_COUPLING = TRUE; //用于判断是否和MODELICA耦合
 bool IF_PANEL_AREA = TRUE; //判断是否实时更新PANEL单元的面积
@@ -128,6 +130,8 @@ double Velocity_Filter_L = 0;
 double Velocity_Filter_G = 0;
 
 int PanelMod = 0;//用于判断采用哪种PanelMod，与Cheng et al（2020）文章中的一致，1: S1, 2: S2, 3 :S3
+
+int howmanyThread = 0; //该变量用于统计有多少个并行线程
 
 
 
@@ -829,7 +833,9 @@ extern "C" _declspec(dllexport) int Modelica2Dll(double time, double *disp, doub
             //---------------------------------------------------------------------
             //阻塞Modelica线程，等待ABAQUS发出进行信号
             HANDLE event4 = OpenEvent(EVENT_ALL_ACCESS, FALSE, L"Modelica调用");
+            cout << "Modelica调用锁住！" << endl;
             WaitForSingleObject(event4, INFINITE);//等待ABAQUS的DLOAD输入
+            cout << "Modelica调用解锁！" << endl;
             if (event4 == NULL)
             {
                 cout << "Failed Open event4" << endl;
@@ -929,6 +935,8 @@ extern "C" _declspec(dllexport) int abaqusdllurdfil(double *time, double* dload)
         if (time[0]>=TIME)//2023.7.6 此部分是用来判断ABAQSU时间步是否超过Modelica，如果超过了则停下来，让modelica更新新的位置、速度、加速度
         {
             ERR = TRUE;
+            howmanyThread = howmanyThread + 1;
+            cout << " time[0] = " << time[0] << "    homanyThread = " << howmanyThread << endl;
         }
         else
         {
@@ -955,7 +963,9 @@ extern "C" _declspec(dllexport) int abaqusdllurdfil(double *time, double* dload)
             cout << "Send signal to tell Modelica DLOAD have been writen..." << endl;
 
             HANDLE event2 = OpenEvent(EVENT_ALL_ACCESS, FALSE, L"ABAQUS调用");
+            cout << "ABAQUS调用锁住！" << endl;
             WaitForSingleObject(event2, INFINITE);//等待Modelica的DISP输入
+            cout << "ABAQUS调用解锁！" << endl;
             if (event2 == NULL)
             {
                 cout << "Failed Open event2" << endl;
@@ -1028,9 +1038,9 @@ extern "C" _declspec(dllexport) int abaqusdlldisp(double *time, double* disp, do
 
     //if (time[0] != TIME2 && N==1 && ERR)//N的作用是防止程序第一次调用就卡住了，因为time[0]在首次运行时是不等于TIME2的
     //2023.7.6 上面这步是之前判断ABAQUS是否阻塞的条件判断语句，现改为如下形式，即当前step时间大于Modelica时间TIME，则发生耦合。
-    if (time[1]>=TIME+time[2])
+    if (time[1] >= TIME + 0.02) // 0.01为时间步长，由于此时TIME尚未更新，依然还是上一时间步的时间，所以加上步长0.01.
     {
-       
+        cout << "time[1]=  " << time[1] << "    TIME= " << TIME << "    time[2] = " << time[2] << endl;
         //////////////////////////////////////////////////////////////////////////
         //----------------------------------------------------------------------//
         //当全局时间更新时，本步将堵住ABAQUS的运行，直到Modelica更新完DISP，
@@ -1042,6 +1052,7 @@ extern "C" _declspec(dllexport) int abaqusdlldisp(double *time, double* disp, do
         //2022.10.14记录
         //----------------------------------------------------------------------//
         //////////////////////////////////////////////////////////////////////////
+
         HANDLE event2 = OpenEvent(EVENT_ALL_ACCESS, FALSE, L"ABAQUS调用2");
         
         if (event2 == NULL)
@@ -1056,7 +1067,9 @@ extern "C" _declspec(dllexport) int abaqusdlldisp(double *time, double* disp, do
             cout << "OpenEvent 'ABAQUS_2' Success!" << endl;
         }
         //ResetEvent(event2);
+        cout << "ABAQUS调用2锁住！" << endl;
         WaitForSingleObject(event2, INFINITE);//等待Modelica的DISP输入
+        cout << "ABAQUS调用2解锁！" << endl;
         ////////////////////////////////////////////////////////////////////////////
     }
     //------------------------------------------------------------------------------
@@ -1561,6 +1574,14 @@ extern "C" _declspec(dllexport) int getv(int* ELM_NO, double* time, double* VW, 
     return 0;
 }
 
+/// <summary>
+/// 本函数用于计算Morison的水质点速度，和Panel单元的力
+/// </summary>
+/// <param name="NOEL">单元编号</param>
+/// <param name="time">time[0]为当前step的时间，time[1]为整体的时间</param>
+/// <param name="VW">在Morison模型中是水质点速度，在Panel模型中是水动力作用力</param>
+/// <param name="DOWAVE">是否包含波浪，当=1时有波浪，当不等于1时无波浪</param>
+/// <returns></returns>
 extern "C" _declspec(dllexport) int getwaterv(int* NOEL, double* time, double* VW, int* DOWAVE)
 {
     //cout << "come into getwaterv!" << endl;
@@ -1672,12 +1693,13 @@ extern "C" _declspec(dllexport) int getwaterv(int* NOEL, double* time, double* V
                 PANEL3[NO1][1] = 0;
                 PANEL3[NO1][2] = 0;
             }
-            else if (velocity_local > Velocity_Filter_G && IF_VELOCITY_FILTER)
+            else if (velocity_local > Velocity_Filter_G && IF_VELOCITY_FILTER )
             {
                 PANEL3[NO1][0] = PANEL3[NO1][0] / velocity_local * Velocity_Filter_G;
                 PANEL3[NO1][1] = PANEL3[NO1][1] / velocity_local * Velocity_Filter_G;
                 PANEL3[NO1][2] = PANEL3[NO1][2] / velocity_local * Velocity_Filter_G;
             }
+           
 
             
             if (PANEL5[NO1])//如果判断当前PANEL单元为网衣背面，则水流速度需要衰减
@@ -1703,12 +1725,50 @@ extern "C" _declspec(dllexport) int getwaterv(int* NOEL, double* time, double* V
             Ve_Water(2) = vw[2] - PANEL3[NO1][2] + current1[2];
             
             calculateforce(F1, Normal, Ve_Water, NO1);
-            /*if (*NOEL == selectElement[0])
+            if (*NOEL == selectElement[0])
             {
-                cout << "E(1) VeWater(1-3)=    " << Ve_Water(0) << "    " << Ve_Water(1) << "    " << Ve_Water(2) << endl;
+                string ELMTFORCE = "ELMTFORCE1.txt";
+                string WorkPath = WorkPathChar;
+                string fileName = WorkPath + ELMTFORCE;
+                
+                if (initial_ELMTFORCE1)
+                {
+                    
+                    
+                    ofstream fout(fileName, ios::out);
+                    if (!fout)
+                    {
+                        std::cerr << "open ELMTFORCE1.txt error!" << endl;
+                        fout.close();
+                        return 0;
+                    }
+                    else
+                    {
+                        cout << "Open ELMTFORCE1.txt success!" << endl;
+                    }
+                    fout.close();
+                    initial_ELMTFORCE1 = FALSE;
+                }
+
+                cout << "进入到ELMTFORCE1.txt输出系统！" << endl;
+               
+                ofstream fout(fileName, ios::app);
+                if (!fout)
+                {
+                    std::cerr << "open ELMTFORCE1.txt error!" << endl;
+                    fout.close();
+                    return 0;
+                }
+                else
+                {
+                    fout << "time=  " << time1 << "    E(1) VeWater(1-3)= " << Ve_Water(0) << "    " << Ve_Water(1) << "    " << Ve_Water(2) << "    PANEL3[0-2]  " << PANEL3[NO1][0] << "    " << PANEL3[NO1][1] << "    " << PANEL3[NO1][2] << "    F1 =  " << F1[0] << "    " << F1[1] << "    " << F1[2] << endl;
+
+                }
+                fout.close();
+                /*cout << "E(1) VeWater(1-3)=    " << Ve_Water(0) << "    " << Ve_Water(1) << "    " << Ve_Water(2) << endl;
                 cout << "curent[0-2]  " << current[0] << "    " << current[1] << "    " << current[2] << endl;
-                cout << "F1 =  " << F1[0] <<"    " <<F1[1]<<"    "<< F1[2] << endl;
-            }*/
+                cout << "F1 =  " << F1[0] <<"    " <<F1[1]<<"    "<< F1[2] << endl;*/
+            }
             
         }
 
@@ -1757,12 +1817,13 @@ extern "C" _declspec(dllexport) int getwaterv(int* NOEL, double* time, double* V
                 PANEL3[NO2][1] = 0;
                 PANEL3[NO2][2] = 0;
             }
-            else if (velocity_local > Velocity_Filter_G && IF_VELOCITY_FILTER)
+            else if (velocity_local > Velocity_Filter_G && IF_VELOCITY_FILTER )
             {
                 PANEL3[NO2][0] = PANEL3[NO2][0] / velocity_local * Velocity_Filter_G;
                 PANEL3[NO2][1] = PANEL3[NO2][1] / velocity_local * Velocity_Filter_G;
                 PANEL3[NO2][2] = PANEL3[NO2][2] / velocity_local * Velocity_Filter_G;
             }
+            
 
             if (PANEL5[NO2])//如果判断当前PANEL单元为网衣背面，则水流速度需要衰减
             {
@@ -1787,6 +1848,50 @@ extern "C" _declspec(dllexport) int getwaterv(int* NOEL, double* time, double* V
             Ve_Water(2) = vw[2] - PANEL3[NO2][2] + current2[2];
            
             calculateforce(F2, Normal, Ve_Water, NO2);
+            if (*NOEL == selectElement[0])
+            {
+                string ELMTFORCE = "ELMTFORCE2.txt";
+                string WorkPath = WorkPathChar;
+                string fileName = WorkPath + ELMTFORCE;
+
+                if (initial_ELMTFORCE2)
+                {
+
+
+                    ofstream fout(fileName, ios::out);
+                    if (!fout)
+                    {
+                        std::cerr << "open ELMTFORCE2.txt error!" << endl;
+                        fout.close();
+                        return 0;
+                    }
+                    else
+                    {
+                        cout << "Open ELMTFORCE2.txt success!" << endl;
+                    }
+                    fout.close();
+                    initial_ELMTFORCE2 = FALSE;
+                }
+
+                cout << "进入到ELMTFORCE2.txt输出系统！" << endl;
+
+                ofstream fout(fileName, ios::app);
+                if (!fout)
+                {
+                    std::cerr << "open ELMTFORCE2.txt error!" << endl;
+                    fout.close();
+                    return 0;
+                }
+                else
+                {
+                    fout << "time=  " << time1 << "    E(2) VeWater(1-3)= " << Ve_Water(0) << "    " << Ve_Water(1) << "    " << Ve_Water(2) << "    PANEL3[0-2]  " << PANEL3[NO2][0] << "    " << PANEL3[NO2][1] << "    " << PANEL3[NO2][2] << "    F2 =  " << F2[0] << "    " << F2[1] << "    " << F2[2] << endl;
+
+                }
+                fout.close();
+                /*cout << "E(1) VeWater(1-3)=    " << Ve_Water(0) << "    " << Ve_Water(1) << "    " << Ve_Water(2) << endl;
+                cout << "curent[0-2]  " << current[0] << "    " << current[1] << "    " << current[2] << endl;
+                cout << "F1 =  " << F1[0] <<"    " <<F1[1]<<"    "<< F1[2] << endl;*/
+            }
             /*if (*NOEL == selectElement[0])
             {
                 cout << "E(2) VeWater(1-3)=    " << Ve_Water(0) << "    " << Ve_Water(1) << "    " << Ve_Water(2) << endl;
@@ -1806,9 +1911,9 @@ extern "C" _declspec(dllexport) int getwaterv(int* NOEL, double* time, double* V
         }
         
 
-        for (int i = 0;i < 10;i++)
-        {
-            if (*NOEL == selectElement[i])
+ //       for (int i = 0;i < 10;i++)
+ //       {
+            if (*NOEL == selectElement[0])
             {
                 //建立elementForce,计算得到的力
                 string elementForce = "elementForce.txt";
@@ -1823,12 +1928,12 @@ extern "C" _declspec(dllexport) int getwaterv(int* NOEL, double* time, double* V
                 }
                 else
                 {
-                    fout << *NOEL << "  VW[0-2] " << VW[0] << "    " << VW[1] << "    " << VW[2] << endl;
+                    fout << "STEP TIME = " << time1 << "    NOEL = " << *NOEL << "  VW[0-2] " << VW[0] << "    " << VW[1] << "    " << VW[2] << endl;
 
                 }
                 fout.close();
             }
-        }
+//        }
         
 
         delete[] F1;
