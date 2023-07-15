@@ -137,6 +137,7 @@ int howmanyThread = 0; //该变量用于统计有多少个并行线程
 
 char WorkPathChar[100] = { 0 };
 int CharLength = 0;
+int CaseID = 0;
 
 //std::string WorkPath = "Aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 
@@ -236,6 +237,9 @@ extern "C" _declspec(dllexport) int start_zhu()
 
     in >> label;
     in >> IF_INFI_DEPTH; // 是否采用无限水深计算k值和水质点速度
+
+    in >> label;
+    in >> CaseID;
     CharLength = workpath.length();
     strcpy_s(WorkPathChar, CharLength + 1, workpath.c_str());
     
@@ -273,6 +277,7 @@ extern "C" _declspec(dllexport) int start_zhu()
     cout << "selectPanel:" << selectPanel[0] << "    " << selectPanel[5] << endl;
     cout << "selectNode: " << selectNode[0] << "    " << selectNode[5] << endl;
     cout << "IF_INFI_DEPTH:" << IF_INFI_DEPTH << endl;
+    cout << "CaseID:" << CaseID << endl;
 	cout << "Initialized success!" << endl;
     cout << "&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&" << endl;
     cout << endl;
@@ -567,6 +572,8 @@ extern "C" _declspec(dllexport) int Modelica2Dll(double time, double *disp, doub
 
     cout << "进入Modelica2Dll程序！" << endl;
 
+    cout << "#1 CaseID = " << CaseID << endl;
+
     TIME_INT = int(time * 10 / dTIME);
     TIME3_INT = int(TIME3 * 10 / dTIME);
 
@@ -785,8 +792,33 @@ extern "C" _declspec(dllexport) int Modelica2Dll(double time, double *disp, doub
         {
             //---------------------------------------------------------------------
             //调用线程工具，告诉ABAQUS可以运行
-            HANDLE event1 = OpenEvent(EVENT_ALL_ACCESS, FALSE, L"ABAQUS调用");
-            HANDLE event3 = OpenEvent(EVENT_ALL_ACCESS, FALSE, L"ABAQUS调用2");
+
+            cout << "#2 CaseID = " << CaseID << endl;
+
+            int CaseID_local; //取共享内存中变量CaseID,到局部变量，防止操作中改变了CaseID的内容
+            string abaqusCall = "AbaqusCall";
+            string abaqusCall2 = "AbaqusCall2";
+            CaseID_local = CaseID;
+            string Event_AbaqusCall = abaqusCall + to_string(CaseID_local);
+            string Event_AbaqusCall2 = abaqusCall2 + to_string(CaseID_local);
+            cout << "CaseID = " << CaseID << endl;
+            cout << "CaseID_local = " << CaseID_local << endl;
+            cout << "Event_AbaqusCall =  " << Event_AbaqusCall << endl;
+            cout << "Event_AbaqusCall2 = " << Event_AbaqusCall2 << endl;
+
+            int len = MultiByteToWideChar(CP_UTF8, 0, Event_AbaqusCall.c_str(), -1, NULL, 0);
+            wchar_t* wstr2 = new wchar_t[len];
+            MultiByteToWideChar(CP_UTF8, 0, Event_AbaqusCall.c_str(), -1, wstr2, len);
+
+            len = MultiByteToWideChar(CP_UTF8, 0, Event_AbaqusCall2.c_str(), -1, NULL, 0);
+            wchar_t* wstr3 = new wchar_t[len];
+            MultiByteToWideChar(CP_UTF8, 0, Event_AbaqusCall2.c_str(), -1, wstr3, len);
+
+            HANDLE event1 = OpenEvent(EVENT_ALL_ACCESS, FALSE, wstr2);
+            HANDLE event3 = OpenEvent(EVENT_ALL_ACCESS, FALSE, wstr3);
+
+            //HANDLE event1 = OpenEvent(EVENT_ALL_ACCESS, FALSE, L"ABAQUS调用");
+            //HANDLE event3 = OpenEvent(EVENT_ALL_ACCESS, FALSE, L"ABAQUS调用2");
             if (event1 == NULL)
             {
                 cout << "Failed open event1" << endl;
@@ -832,7 +864,19 @@ extern "C" _declspec(dllexport) int Modelica2Dll(double time, double *disp, doub
 
             //---------------------------------------------------------------------
             //阻塞Modelica线程，等待ABAQUS发出进行信号
-            HANDLE event4 = OpenEvent(EVENT_ALL_ACCESS, FALSE, L"Modelica调用");
+
+          
+            string modelicaCall = "ModelicaCall";            
+            
+            string Event_ModelicaCall = modelicaCall + to_string(CaseID_local);
+            
+
+            len = MultiByteToWideChar(CP_UTF8, 0, Event_ModelicaCall.c_str(), -1, NULL, 0);
+            wchar_t* wstr1 = new wchar_t[len];
+            MultiByteToWideChar(CP_UTF8, 0, Event_ModelicaCall.c_str(), -1, wstr1, len);
+
+            HANDLE event4 = OpenEvent(EVENT_ALL_ACCESS, FALSE, wstr1);
+            //HANDLE event4 = OpenEvent(EVENT_ALL_ACCESS, FALSE, L"Modelica调用");
             cout << "Modelica调用锁住！" << endl;
             WaitForSingleObject(event4, INFINITE);//等待ABAQUS的DLOAD输入
             cout << "Modelica调用解锁！" << endl;
@@ -847,6 +891,10 @@ extern "C" _declspec(dllexport) int Modelica2Dll(double time, double *disp, doub
             {
                 cout << "OpenEvent 'event4' Success!" << endl;
             }
+
+            delete[] wstr1;
+            delete[] wstr2;
+            delete[] wstr3;
         }
 
         
@@ -946,7 +994,20 @@ extern "C" _declspec(dllexport) int abaqusdllurdfil(double *time, double* dload)
         if (ERR)  //增加这个判断，当ABAQUS与Modelica时间步相同时，才执行阻塞事件
         {
             cout << "#4 UDFILE程序中ERR判断为真时，各时间状态!" << "    TIME_INT=" << TIME_INT << "    TIME3_INT=" << TIME3_INT << "    time[0]=    " << time[0] << "    TIME3=  " << TIME3 << endl;
-            HANDLE event1 = OpenEvent(EVENT_ALL_ACCESS, FALSE, L"Modelica调用");
+            
+            int CaseID_local; //取共享内存中变量CaseID,到局部变量，防止操作中改变了CaseID的内容
+            string modelicaCall = "ModelicaCall";
+
+            CaseID_local = CaseID;
+            string Event_ModelicaCall = modelicaCall + to_string(CaseID_local);
+
+
+            int len = MultiByteToWideChar(CP_UTF8, 0, Event_ModelicaCall.c_str(), -1, NULL, 0);
+            wchar_t* wstr1 = new wchar_t[len];
+            MultiByteToWideChar(CP_UTF8, 0, Event_ModelicaCall.c_str(), -1, wstr1, len);
+            
+            HANDLE event1 = OpenEvent(EVENT_ALL_ACCESS, FALSE,wstr1);
+            //HANDLE event1 = OpenEvent(EVENT_ALL_ACCESS, FALSE, L"Modelica调用");
             if (event1 == NULL)
             {
                 cout << "Failed open event1" << endl;
@@ -962,7 +1023,17 @@ extern "C" _declspec(dllexport) int abaqusdllurdfil(double *time, double* dload)
             SetEvent(event1);//发出信号，告诉Modelica这边已经计算完成
             cout << "Send signal to tell Modelica DLOAD have been writen..." << endl;
 
-            HANDLE event2 = OpenEvent(EVENT_ALL_ACCESS, FALSE, L"ABAQUS调用");
+            
+            string abaqusCall = "AbaqusCall";            
+            string Event_AbaqusCall = abaqusCall + to_string(CaseID_local);
+            
+
+            len = MultiByteToWideChar(CP_UTF8, 0, Event_AbaqusCall.c_str(), -1, NULL, 0);
+            wchar_t* wstr2 = new wchar_t[len];
+            MultiByteToWideChar(CP_UTF8, 0, Event_AbaqusCall.c_str(), -1, wstr2, len);
+
+            HANDLE event2 = OpenEvent(EVENT_ALL_ACCESS, FALSE, wstr2);
+            //HANDLE event2 = OpenEvent(EVENT_ALL_ACCESS, FALSE, L"ABAQUS调用");
             cout << "ABAQUS调用锁住！" << endl;
             WaitForSingleObject(event2, INFINITE);//等待Modelica的DISP输入
             cout << "ABAQUS调用解锁！" << endl;
@@ -977,6 +1048,9 @@ extern "C" _declspec(dllexport) int abaqusdllurdfil(double *time, double* dload)
             {
                 cout << "OpenEvent 'event2' Success!" << endl;
             }
+
+            delete[] wstr1;
+            delete[] wstr2;
         }
     }
     ////////////////////////////////////////////////////////////////////////////
@@ -1053,7 +1127,20 @@ extern "C" _declspec(dllexport) int abaqusdlldisp(double *time, double* disp, do
         //----------------------------------------------------------------------//
         //////////////////////////////////////////////////////////////////////////
 
-        HANDLE event2 = OpenEvent(EVENT_ALL_ACCESS, FALSE, L"ABAQUS调用2");
+        int CaseID_local; //取共享内存中变量CaseID,到局部变量，防止操作中改变了CaseID的内容
+        string abaqusCall2 = "AbaqusCall2";
+        CaseID_local = CaseID;
+        
+        string Event_AbaqusCall2 = abaqusCall2 + to_string(CaseID_local);
+
+        
+
+        int len = MultiByteToWideChar(CP_UTF8, 0, Event_AbaqusCall2.c_str(), -1, NULL, 0);
+        wchar_t* wstr3 = new wchar_t[len];
+        MultiByteToWideChar(CP_UTF8, 0, Event_AbaqusCall2.c_str(), -1, wstr3, len);
+
+        HANDLE event2 = OpenEvent(EVENT_ALL_ACCESS, FALSE, wstr3);
+        //HANDLE event2 = OpenEvent(EVENT_ALL_ACCESS, FALSE, L"ABAQUS调用2");
         
         if (event2 == NULL)
         {
@@ -1070,6 +1157,7 @@ extern "C" _declspec(dllexport) int abaqusdlldisp(double *time, double* disp, do
         cout << "ABAQUS调用2锁住！" << endl;
         WaitForSingleObject(event2, INFINITE);//等待Modelica的DISP输入
         cout << "ABAQUS调用2解锁！" << endl;
+        delete[] wstr3;
         ////////////////////////////////////////////////////////////////////////////
     }
     //------------------------------------------------------------------------------
