@@ -70,9 +70,11 @@ double k_w[200] = { 0 };//波数
 double S[200] = { 0 };//波浪谱
 double AW[200] = { 0 };
 double domega = NULL;
-double f1[200];
+//double f1[200];
 
 double current[3] = { 0 };
+
+double k_r = NULL; //用于规则波中的波数
 
 
 
@@ -119,6 +121,8 @@ bool initial_SETCOORD = TRUE;
 bool initial_GETV = TRUE;
 bool initial_ELMTFORCE1 = TRUE;
 bool initial_ELMTFORCE2 = TRUE;
+bool initial_ELMTFORCE3 = TRUE;
+bool initial_ELMTFORCE4 = TRUE;
 bool IF_ELEM_VELOCITY = TRUE; //用于判断在计算Panel单元水流相对速度时是否计算Panel单元自身的速度
 bool IF_COUPLING = TRUE; //用于判断是否和MODELICA耦合
 bool IF_PANEL_AREA = TRUE; //判断是否实时更新PANEL单元的面积
@@ -332,10 +336,14 @@ extern "C" _declspec(dllexport) int start_zhu()
     {
         U1[i] = readOutFile.randomValue[i][0];
         U2[i] = readOutFile.randomValue[i][1];
+        cout << "U1[" << i << "] =    " << U1[i] << endl; //用于检查随机量读取是否正确
+        cout << "U2[" << i << "] =    " << U2[i] << endl;
 
     }
 
     cout << "随机量读取完成！" << endl;
+
+    
 
     //----------------------------------------------------------------------------------
     for (int i = 0;i < readOutFile.hydroline;i++)
@@ -369,6 +377,11 @@ extern "C" _declspec(dllexport) int start_zhu()
     cout << "波数生成完毕！" << endl;
 
 
+
+    k_r = WaveNumber.newton(2 * pi / Tp);
+    cout << "规则波波数k_r =  " << k_r << endl;
+
+
     //----------------------------------------------------------------------------------
     //给波浪谱赋值
     wavespectral2 WaveSpectral(Hs, Tp);
@@ -378,7 +391,9 @@ extern "C" _declspec(dllexport) int start_zhu()
 
         AW[i] = sqrt(2 * S[i] * domega);
 
-        f1[i] = sqrt(-2 * log(U1[i]));//这里把能赋值的都先赋值了
+        //f1[i] = sqrt(-2 * log(U1[i]));//这里把能赋值的都先赋值了
+
+        //cout << "f1[" << i << "]=  " << f1[i] << endl;
     }
 
 
@@ -747,7 +762,7 @@ extern "C" _declspec(dllexport) int Modelica2Dll(double time, double *disp, doub
         */
         for (int i = 0;i < 6;i++)
         {
-            DISP_T1[i] = DISP_T2[i];
+            //DISP_T1[i] = DISP_T2[i];   //由于ABAQUS的角度计算存在误差积累，为了抑制这个误差，采用ABAQUS的结果对DISP_T1进行赋值
             VELOCITY_T1[i] = VELOCITY_T2[i];
             ACCEL_ZHU_T1[i] = ACCEL_ZHU_T2[i];
         }
@@ -1688,10 +1703,7 @@ extern "C" _declspec(dllexport) int getwaterv(int* NOEL, double* time, double* V
     double COORD[3];//本COORD用于NET_MODE==1的情况下
     double COORD2[3][2];//本COORD2用于NET_MODE == 2的情况下
 
-    /*if (*NOEL == selectElement[0])
-    {
-        cout << "selectElement:  " << selectElement[0] << "    DOWAVE = " << *DOWAVE << endl;
-    }*/
+    
     
   
     if (NET_MODE == 1)
@@ -1705,7 +1717,7 @@ extern "C" _declspec(dllexport) int getwaterv(int* NOEL, double* time, double* V
         COORD[1] = 0.5 * (NODES[NO1][1] + NODES[NO1][1]);
         COORD[2] = 0.5 * (NODES[NO1][2] + NODES[NO1][2]);
 
-        fluidVelocity(vw, time1, COORD);
+        fluidVelocity(vw, time1, COORD, *NOEL);
         Vw[0] = vw[0] + current[0];//+current为水流速度，修改于2023.3.15
         Vw[1] = vw[1] + current[1];
         Vw[2] = vw[2] + current[2];
@@ -1758,7 +1770,7 @@ extern "C" _declspec(dllexport) int getwaterv(int* NOEL, double* time, double* V
             COORD[2] = COORD2[2][0];
             if (*DOWAVE == 1) //添加于2023.6.27，用于判断该阶段是否有波浪
             {
-                fluidVelocity(vw, time2, COORD); //修改time1为time2，为了控制在不同Step下是否加波浪，2023.6.27
+                fluidVelocity(vw, time2, COORD, *NOEL); //修改time1为time2，为了控制在不同Step下是否加波浪，2023.6.27
             }
             else
             {
@@ -1807,10 +1819,26 @@ extern "C" _declspec(dllexport) int getwaterv(int* NOEL, double* time, double* V
                 current1[1] = current[1];
                 current1[2] = current[2];
             }
+
+            if (COORD[2] < 0)
+            {
+                Ve_Water(0) = vw[0] - PANEL3[NO1][0] + current1[0];//水质点相对速度Ve_Water = vw-vx;vw为水质点速度，vx为Panel单元速度，修改于2023.3.14
+                Ve_Water(1) = vw[1] - PANEL3[NO1][1] + current1[1];
+                Ve_Water(2) = vw[2] - PANEL3[NO1][2] + current1[2];
+            }
+            else
+            {
+                Ve_Water(0) = 0;
+                Ve_Water(1) = 0;
+                Ve_Water(2) = 0;
+            }
             
-            Ve_Water(0) = vw[0] - PANEL3[NO1][0] + current1[0];//水质点相对速度Ve_Water = vw-vx;vw为水质点速度，vx为Panel单元速度，修改于2023.3.14
-            Ve_Water(1) = vw[1] - PANEL3[NO1][1] + current1[1];
-            Ve_Water(2) = vw[2] - PANEL3[NO1][2] + current1[2];
+            
+           
+
+
+
+            
             
             calculateforce(F1, Normal, Ve_Water, NO1);
             if (*NOEL == selectElement[0])
@@ -1849,7 +1877,7 @@ extern "C" _declspec(dllexport) int getwaterv(int* NOEL, double* time, double* V
                 }
                 else
                 {
-                    fout << "time=  " << time1 << "    E(1) VeWater(1-3)= " << Ve_Water(0) << "    " << Ve_Water(1) << "    " << Ve_Water(2) << "    PANEL3[0-2]  " << PANEL3[NO1][0] << "    " << PANEL3[NO1][1] << "    " << PANEL3[NO1][2] << "    F1 =  " << F1[0] << "    " << F1[1] << "    " << F1[2] << endl;
+                    fout << "time=  " << time1 << "  DOWAVE = " << *DOWAVE << "   vw(1-3)=  " << vw[0] << "    " << vw[1] << "    " << vw[2] << "    E(1) VeWater(1-3)= " << Ve_Water(0) << "    " << Ve_Water(1) << "    " << Ve_Water(2) << "    PANEL3[0-2]  " << PANEL3[NO1][0] << "    " << PANEL3[NO1][1] << "    " << PANEL3[NO1][2] << "    F1 =  " << F1[0] << "    " << F1[1] << "    " << F1[2] << endl;
 
                 }
                 fout.close();
@@ -1882,7 +1910,7 @@ extern "C" _declspec(dllexport) int getwaterv(int* NOEL, double* time, double* V
 
             if (*DOWAVE == 1) //添加于2023.6.27，用于判断该阶段是否有波浪
             {
-                fluidVelocity(vw, time2, COORD); //修改time1为time2，为了控制在不同Step下是否加波浪，2023.6.27
+                fluidVelocity(vw, time2, COORD, *NOEL); //修改time1为time2，为了控制在不同Step下是否加波浪，2023.6.27
             }
             else
             {
@@ -1931,9 +1959,19 @@ extern "C" _declspec(dllexport) int getwaterv(int* NOEL, double* time, double* V
                 current2[2] = current[2];
             }
 
-            Ve_Water(0) = vw[0] - PANEL3[NO2][0] + current2[0];//水质点相对速度Ve_Water = vw-vx;vw为水质点速度，vx为Panel单元速度;修改于2023.3.14
-            Ve_Water(1) = vw[1] - PANEL3[NO2][1] + current2[1];
-            Ve_Water(2) = vw[2] - PANEL3[NO2][2] + current2[2];
+            if (COORD[2] < 0)
+            {
+                Ve_Water(0) = vw[0] - PANEL3[NO2][0] + current2[0];//水质点相对速度Ve_Water = vw-vx;vw为水质点速度，vx为Panel单元速度;修改于2023.3.14
+                Ve_Water(1) = vw[1] - PANEL3[NO2][1] + current2[1];
+                Ve_Water(2) = vw[2] - PANEL3[NO2][2] + current2[2];
+            }
+            else
+            {
+                Ve_Water(0) = 0;
+                Ve_Water(1) = 0;
+                Ve_Water(2) = 0;
+            }
+            
            
             calculateforce(F2, Normal, Ve_Water, NO2);
             if (*NOEL == selectElement[0])
@@ -1972,7 +2010,7 @@ extern "C" _declspec(dllexport) int getwaterv(int* NOEL, double* time, double* V
                 }
                 else
                 {
-                    fout << "time=  " << time1 << "    E(2) VeWater(1-3)= " << Ve_Water(0) << "    " << Ve_Water(1) << "    " << Ve_Water(2) << "    PANEL3[0-2]  " << PANEL3[NO2][0] << "    " << PANEL3[NO2][1] << "    " << PANEL3[NO2][2] << "    F2 =  " << F2[0] << "    " << F2[1] << "    " << F2[2] << endl;
+                    fout << "time=  " << time1 << "  DOWAVE = " << *DOWAVE <<"   vw(1-3)" << vw[0] << "    " << vw[1] << "    " << vw[2] << "    E(2) VeWater(1-3)= " << Ve_Water(0) << "    " << Ve_Water(1) << "    " << Ve_Water(2) << "    PANEL3[0-2]  " << PANEL3[NO2][0] << "    " << PANEL3[NO2][1] << "    " << PANEL3[NO2][2] << "    F2 =  " << F2[0] << "    " << F2[1] << "    " << F2[2] << endl;
 
                 }
                 fout.close();
@@ -2016,7 +2054,7 @@ extern "C" _declspec(dllexport) int getwaterv(int* NOEL, double* time, double* V
                 }
                 else
                 {
-                    fout << "STEP TIME = " << time1 << "    NOEL = " << *NOEL << "  VW[0-2] " << VW[0] << "    " << VW[1] << "    " << VW[2] << endl;
+                    fout << "STEP TIME = " << time1 << "    NOEL = " << *NOEL << "  VW[0-2] " << VW[0] << "    " << VW[1] << "    " << VW[2] << "  COORD1[2]" << COORD2[2][0] << "  COORD2[2]" << COORD2[2][1] << endl;
 
                 }
                 fout.close();
@@ -2259,7 +2297,7 @@ extern "C" _declspec(dllexport) int updatepanel()
 }
 
 //本函数用于计算水指点速度，VW为输出变量表示水质点速度，time为当前时刻，COORD为节点坐标
-void fluidVelocity(double VW[3], double time, double COORD[3])
+void fluidVelocity(double VW[3], double time, double COORD[3],int NOEL)
 {
     //double* VW = new double[3];
     double pi = 3.1415926;
@@ -2274,6 +2312,7 @@ void fluidVelocity(double VW[3], double time, double COORD[3])
 
     if (wave_mod == 1) //Irregualar wave
     {
+        double* f1 = new double[F_n];
         double* f2 = new double[F_n];
         double* f3 = new double[F_n];
 
@@ -2282,6 +2321,7 @@ void fluidVelocity(double VW[3], double time, double COORD[3])
 
         for (int i = 0;i < F_n;i++)
         {
+            f1[i] = sqrt(-2 * log(U1[i]));
             f2[i] = cos(omega[i] * time + 2 * pi * U2[i] - k_w[i] * COORD[0]);
             f3[i] = omega[i] * cosh(k_w[i] * (COORD[2] + waterDepth)) / sinh(k_w[i] * waterDepth);
             if (isinf(f3[i]))
@@ -2301,12 +2341,64 @@ void fluidVelocity(double VW[3], double time, double COORD[3])
 
             zeta = zeta + temp1;
             zeta1 = zeta1 + temp2;
+            /*-------------------------------------------------//
+            if (i == 10 && NOEL == selectElement[0])
+            {
+                printout(f1[i], AW[i], f2[i], f3[i]);
+            }
+            //------------------------------------------------/*/
         }
+        ////////////////////////////////////////////////////////////////////////
+        /*
+        if (NOEL == selectElement[0])
+        {
+            string ELMTFORCE = "ELMTFORCE3.txt";
+            string WorkPath = WorkPathChar;
+            string fileName = WorkPath + ELMTFORCE;
+
+            if (initial_ELMTFORCE3)
+            {
+
+
+                ofstream fout(fileName, ios::out);
+                if (!fout)
+                {
+                    std::cerr << "open ELMTFORCE3.txt error!" << endl;
+                    fout.close();
+                    
+                }
+                else
+                {
+                    cout << "Open ELMTFORCE3.txt success!" << endl;
+                }
+                fout.close();
+                initial_ELMTFORCE3 = FALSE;
+            }
+
+            cout << "进入到ELMTFORCE3.txt输出系统！" << endl;
+
+            ofstream fout(fileName, ios::app);
+            if (!fout)
+            {
+                std::cerr << "open ELMTFORCE3.txt error!" << endl;
+                fout.close();
+                
+            }
+            else
+            {
+                fout << " zeta = " << zeta << " " << endl;
+
+            }
+            fout.close();
+           
+        }*/
+        ///////////////////////////////////////////////////////////////////////////////////////
 
         VW[0] = zeta * cos(wave_incide_direction * pi / 180);
         VW[1] = zeta * sin(wave_incide_direction * pi / 180);
         VW[2] = zeta1;
 
+        delete[] f1;
         delete[] f2;
         delete[] f3;
         delete[] f4;
@@ -2314,7 +2406,7 @@ void fluidVelocity(double VW[3], double time, double COORD[3])
     }
     else if (wave_mod == 2) //regular wave
     {
-        waveNumber WaveNumber(waterDepth);
+        //waveNumber WaveNumber(waterDepth); //本处的波数计算提前到了start_zhu的初始化过程中了，以提高计算效率。 2023.8.4
         double Omega = 2 * pi / Tp;
         double ff3;
         double ff5;
@@ -2326,7 +2418,8 @@ void fluidVelocity(double VW[3], double time, double COORD[3])
         }
         else
         {
-            k = WaveNumber.newton(Omega);
+            //k = WaveNumber.newton(Omega); //本处的波数计算提前到了start_zhu的初始化过程中了，以提高计算效率。 2023.8.4
+            k = k_r;
             ff3 = Omega * cosh(k * (COORD[2] + waterDepth)) / sinh(k * waterDepth);
             ff5 = Omega * sinh(k * (COORD[2] + waterDepth)) / sinh(k * waterDepth);
         }
@@ -2338,7 +2431,7 @@ void fluidVelocity(double VW[3], double time, double COORD[3])
         zeta = 0.5 * Hs * ff2 * ff3;//0.5*Hs为波浪振幅
         zeta1 = 0.5 * Hs * ff4 * ff5;
 
-        if (COORD[2] < 0)
+        if (COORD[2] < 0) //本判断意思是当Panel单元的位置超过水面后，水质点速度为0
         {
             VW[0] = zeta * cos(wave_incide_direction * pi / 180);
             VW[1] = zeta * sin(wave_incide_direction * pi / 180);
@@ -2517,4 +2610,57 @@ double CD_calculate(Vector3d vw)
         CD_local = CD0 * (0.9 * cos(0) + 0.1 * cos(0));        
       }
     return CD_local;
+}
+
+void printout(double valueP1, double valueP2, double valueP3, double valueP4)
+{
+        string ELMTFORCE = "ELMTFORCE4.txt";
+        string WorkPath = WorkPathChar;
+        string fileName = WorkPath + ELMTFORCE;
+
+        if (initial_ELMTFORCE4)
+        {
+
+
+            ofstream fout(fileName, ios::out);
+            if (!fout)
+            {
+                std::cerr << "open ELMTFORCE4.txt error!" << endl;
+                fout.close();
+
+            }
+            else
+            {
+                cout << "Open ELMTFORCE4.txt success!" << endl;
+            }
+            fout.close();
+            initial_ELMTFORCE4 = FALSE;
+        }
+
+        cout << "进入到ELMTFORCE3.txt输出系统！" << endl;
+
+        ofstream fout(fileName, ios::app);
+        if (!fout)
+        {
+            std::cerr << "open ELMTFORCE4.txt error!" << endl;
+            fout.close();
+
+        }
+        else
+        {
+            fout << " value = " << valueP1 << "    " << valueP2 << "    " << valueP3 << "    " << valueP4 << endl;
+
+        }
+        fout.close();
+           
+}
+
+extern "C" _declspec(dllexport) int setu(double* U_LOCAL)
+{
+    for (int i = 0; i < 6; i++)
+    {
+        DISP_T1[i] = U_LOCAL[i];
+    }
+    
+    return 0;
 }

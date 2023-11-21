@@ -21,6 +21,8 @@ extern "C" _declspec(dllexport) int setcoord(int* ELM_NO, double* time, double* 
 extern "C" _declspec(dllexport) int getv(int* ELM_NO, double* time, double* VW, double* V);
 extern "C" _declspec(dllexport) int getwaterv(int* NOEL, double* time, double* VW, int* DOWAVE);
 extern "C" _declspec(dllexport) int updatepanel();
-void fluidVelocity(double VW[3], double time, double COORD[3]);
+extern "C" _declspec(dllexport) int setu(double* U_LOCAL);
+void fluidVelocity(double VW[3], double time, double COORD[3], int NOEL);
 void calculateforce(double F[3],Vector3d Normal, Vector3d vw,int NO_local);
 double CD_calculate(Vector3d vw);
+void printout(double valueP1, double valueP2, double valueP3, double valueP4);
