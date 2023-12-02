@@ -88,6 +88,7 @@ double DISP_3TO6[3] = { 0 };
 //double a5[4] = { 0 };
 //double a6[4] = { 0 };
 double aa[6][7] = { 0 };//第一维为自由度，第二维为参数序号
+double last_step_angle[3][2] = { 0 };//记录ABAQUS上一时间步的角度,[3][2],前面的3为自由度，后面的2为当前值和暂存值[0]为当前，[1]为暂存
 
 double NODES[20000][6] = { 0 };//节点，1维：节点编号，2维：[0-2]为位移，[3-5]为速度
 double NODES0[20000][6] = { 0 };
@@ -762,7 +763,7 @@ extern "C" _declspec(dllexport) int Modelica2Dll(double time, double *disp, doub
         */
         for (int i = 0;i < 6;i++)
         {
-            //DISP_T1[i] = DISP_T2[i];   //由于ABAQUS的角度计算存在误差积累，为了抑制这个误差，采用ABAQUS的结果对DISP_T1进行赋值
+            DISP_T1[i] = DISP_T2[i];   //由于ABAQUS的角度计算存在误差积累，为了抑制这个误差，采用ABAQUS的结果对DISP_T1进行赋值
             VELOCITY_T1[i] = VELOCITY_T2[i];
             ACCEL_ZHU_T1[i] = ACCEL_ZHU_T2[i];
         }
@@ -1077,14 +1078,14 @@ extern "C" _declspec(dllexport) int abaqusdllurdfil(double *time, double* dload)
 /// <summary>
 /// 用于abaqus中的子程序DISP获取位移、速度、加速度的函数。
 /// </summary>
-/// <param name="time">输入变量，time[0]为全局时间，time[1]为当前step时间</param>
+/// <param name="time">输入变量，time[0]为全局时间，time[1]为当前step时间, time[2]为time increment</param>
 /// <param name="disp"></param>
 /// <param name="velocity"></param>
 /// <param name="accel_zhu"></param>
 /// <returns></returns>
 extern "C" _declspec(dllexport) int abaqusdlldisp(double *time, double* disp, double* velocity, double* accel_zhu)
 {
-    
+        
     double Disp[6];
     double Disp1[6];
     double Velocity[6];
@@ -1260,13 +1261,20 @@ extern "C" _declspec(dllexport) int abaqusdlldisp(double *time, double* disp, do
     }
     for (int i = 3;i < 6;i++)
     {
-        disp[i] = Disp[i]-aa[i][5];
+        
+        disp[i] = Disp[i] - last_step_angle[i - 3][0];        
+        //last_step_angle[i - 3] = Disp[i]; //对last_step_angle进行幅值
+        //disp[i] = Disp[i]- aa[i][5];
         velocity[i] = Velocity[i];
         accel_zhu[i] = Accel[i];
-        //if (TIME2 != time[0])
-        //{
-        //    DISP_3TO6[i - 3] = Disp[i];
-        //}        
+        
+        if (TIME2 != time[0])
+        {           
+            
+            last_step_angle[i - 3][0] = last_step_angle[i - 3][1];
+            last_step_angle[i - 3][1] = Disp[i]; //Disp对暂存值进行幅值              
+            
+        }        
         //cout << " disp[" << i << "] = " << disp[i] << endl;
     }
     // 由于采用的是直接计算拟合曲线的系数，而非矩阵法，在初步计算时，计算结果不会发生奇异性，所以没必要在开始时将位置强制设置成0
