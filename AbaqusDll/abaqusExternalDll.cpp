@@ -2327,34 +2327,57 @@ void fluidVelocity(double VW[3], double time, double COORD[3],int NOEL)
         double* f4 = new double[F_n];
         double* f5 = new double[F_n];
 
-        for (int i = 0;i < F_n;i++)
-        {
-            f1[i] = sqrt(-2 * log(U1[i]));
-            f2[i] = cos(omega[i] * time + 2 * pi * U2[i] - k_w[i] * COORD[0]);
-            f3[i] = omega[i] * cosh(k_w[i] * (COORD[2] + waterDepth)) / sinh(k_w[i] * waterDepth);
-            if (isinf(f3[i]))
-            {
-                f3[i] = 0;
-            }
+        // 当节点高于水面时，水流速度为0
+        if (COORD[2] < 0) {
 
-            f4[i] = -sin(omega[i] * time + 2 * pi * U2[i] - k_w[i] * COORD[0]);//注意《船舶与海洋工程环境载荷》上第13页描述，与本处的cos sin存在一定差别，如果用sin描述波浪，则和书上一致，如用cos描述波浪，则x方向为cos，z方向为-sin
-            f5[i] = omega[i] * sinh(k_w[i] * (COORD[2] + waterDepth)) / sinh(k_w[i] * waterDepth);
-
-            if (isinf(f5[i]))
+            for (int i = 0; i < F_n; i++)
             {
-                f5[i] = 0;
-            }
-            temp1 = f1[i] * AW[i] * f2[i] * f3[i];
-            temp2 = f1[i] * AW[i] * f4[i] * f5[i];
+                f1[i] = sqrt(-2 * log(U1[i]));
+                f2[i] = cos(omega[i] * time + 2 * pi * U2[i] - k_w[i] * COORD[0]);
 
-            zeta = zeta + temp1;
-            zeta1 = zeta1 + temp2;
-            /*-------------------------------------------------//
-            if (i == 10 && NOEL == selectElement[0])
-            {
-                printout(f1[i], AW[i], f2[i], f3[i]);
+                
+
+                if (IF_INFI_DEPTH) {
+                    f3[i] = omega[i] * exp(k_w[i] * COORD[2]);
+                }
+                else {
+                    f3[i] = omega[i] * cosh(k_w[i] * (COORD[2] + waterDepth)) / sinh(k_w[i] * waterDepth);
+                }
+
+                if (isinf(f3[i]))
+                {
+                    f3[i] = 0;
+                }
+
+                f4[i] = -sin(omega[i] * time + 2 * pi * U2[i] - k_w[i] * COORD[0]);//注意《船舶与海洋工程环境载荷》上第13页描述，与本处的cos sin存在一定差别，如果用sin描述波浪，则和书上一致，如用cos描述波浪，则x方向为cos，z方向为-sin
+
+                if (IF_INFI_DEPTH) {
+                    f5[i] = omega[i] * exp(k_w[i] * COORD[2]);
+                }
+                else {
+                    f5[i] = omega[i] * sinh(k_w[i] * (COORD[2] + waterDepth)) / sinh(k_w[i] * waterDepth);
+                }
+
+                if (isinf(f5[i]))
+                {
+                    f5[i] = 0;
+                }
+                temp1 = f1[i] * AW[i] * f2[i] * f3[i];
+                temp2 = f1[i] * AW[i] * f4[i] * f5[i];
+
+                zeta = zeta + temp1;
+                zeta1 = zeta1 + temp2;
+                /*-------------------------------------------------//
+                if (i == 10 && NOEL == selectElement[0])
+                {
+                    printout(f1[i], AW[i], f2[i], f3[i]);
+                }
+                //------------------------------------------------/*/
             }
-            //------------------------------------------------/*/
+        }
+        else {
+            zeta = 0;
+            zeta1 = 0;
         }
         ////////////////////////////////////////////////////////////////////////
         /*
